@@ -1,0 +1,27 @@
+# dépendances
+/node_modules
+
+# Next.js
+/.next/
+/out/
+
+# environnement
+.env
+.env.local
+.env*.local
+
+# build
+/build
+*.tsbuildinfo
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# éditeurs
+.vscode/
+.DS_Store
+
+# Prisma
+prisma/dev.db

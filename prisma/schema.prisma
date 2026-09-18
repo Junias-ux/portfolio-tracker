@@ -1,0 +1,249 @@
+// Schéma Prisma — reprend le schéma SQL du cahier des charges.
+// Les vues SQL (v_asset_valuation, v_portfolio_summary) ne sont pas
+// modélisées ici : Prisma ne gère pas nativement les vues en V1 de ce
+// schéma. Les calculs équivalents vivent dans src/lib/calculations/.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// V1 — MVP
+// ============================================================
+
+enum Role {
+  individual
+  advisor
+}
+
+model User {
+  id              String   @id @default(uuid())
+  fullName        String
+  email           String   @unique
+  passwordHash    String
+  defaultCurrency String   @default("XAF")
+  role            Role     @default(individual)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  portfolios      Portfolio[]
+  notifications   Notification[]
+  advisorAccess   AdvisorPortfolioAccess[] @relation("AdvisorAccess")
+
+  @@map("users")
+}
+
+model Portfolio {
+  id          String   @id @default(uuid())
+  userId      String
+  name        String
+  currency    String   @default("XAF")
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user               User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assets             Asset[]
+  allocationTargets  AllocationTarget[]
+  benchmarks         PortfolioBenchmark[]
+  advisorAccess      AdvisorPortfolioAccess[]
+
+  @@unique([userId, name])
+  @@map("portfolios")
+}
+
+enum AssetType {
+  stock
+  crypto
+  bond
+  real_estate
+  cash
+  other
+}
+
+model Asset {
+  id            String    @id @default(uuid())
+  portfolioId   String
+  name          String
+  symbol        String?
+  type          AssetType
+  quantityHeld  Decimal   @default(0) @db.Decimal(20, 8)
+  averageCost   Decimal   @default(0) @db.Decimal(20, 8)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  portfolio     Portfolio     @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  transactions  Transaction[]
+  quotes        Quote[]
+  syncLogs      ApiSyncLog[]
+
+  @@index([portfolioId])
+  @@index([symbol])
+  @@map("assets")
+}
+
+enum TransactionType {
+  buy
+  sell
+  dividend
+  deposit
+  withdrawal
+  fee
+}
+
+model Transaction {
+  id              String          @id @default(uuid())
+  assetId         String
+  type            TransactionType
+  quantity        Decimal         @db.Decimal(20, 8)
+  unitPrice       Decimal         @default(0) @db.Decimal(20, 8)
+  transactionDate DateTime        @db.Date
+  note            String?
+  createdAt       DateTime        @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId])
+  @@index([transactionDate])
+  @@map("transactions")
+}
+
+model Quote {
+  id        String   @id @default(uuid())
+  assetId   String
+  price     Decimal  @db.Decimal(20, 8)
+  quoteDate DateTime @db.Date
+  source    String   @default("manual")
+  createdAt DateTime @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, quoteDate])
+  @@map("quotes")
+}
+
+// ============================================================
+// V2 — Allocation, synchronisation automatique
+// ============================================================
+
+model AllocationTarget {
+  id                String    @id @default(uuid())
+  portfolioId       String
+  assetType         AssetType
+  targetPercentage  Decimal   @db.Decimal(5, 2)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, assetType])
+  @@map("allocation_targets")
+}
+
+model ApiSyncLog {
+  id       String   @id @default(uuid())
+  assetId  String?
+  provider String
+  status   String
+  message  String?
+  syncedAt DateTime @default(now())
+
+  asset Asset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  @@map("api_sync_log")
+}
+
+// ============================================================
+// V3 — Multi-devises, notifications, benchmarks, mode conseiller
+// ============================================================
+
+model ExchangeRate {
+  id             String   @id @default(uuid())
+  baseCurrency   String
+  targetCurrency String
+  rate           Decimal  @db.Decimal(20, 10)
+  rateDate       DateTime @db.Date
+  createdAt      DateTime @default(now())
+
+  @@unique([baseCurrency, targetCurrency, rateDate])
+  @@map("exchange_rates")
+}
+
+enum NotificationType {
+  price_alert
+  allocation_drift
+  system
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+model Benchmark {
+  id     String @id @default(uuid())
+  name   String @unique
+  symbol String @unique
+
+  quotes     BenchmarkQuote[]
+  portfolios PortfolioBenchmark[]
+
+  @@map("benchmarks")
+}
+
+model BenchmarkQuote {
+  id          String   @id @default(uuid())
+  benchmarkId String
+  price       Decimal  @db.Decimal(20, 8)
+  quoteDate   DateTime @db.Date
+
+  benchmark Benchmark @relation(fields: [benchmarkId], references: [id], onDelete: Cascade)
+
+  @@unique([benchmarkId, quoteDate])
+  @@map("benchmark_quotes")
+}
+
+model PortfolioBenchmark {
+  portfolioId String
+  benchmarkId String
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  benchmark Benchmark @relation(fields: [benchmarkId], references: [id], onDelete: Cascade)
+
+  @@id([portfolioId, benchmarkId])
+  @@map("portfolio_benchmarks")
+}
+
+enum AdvisorPermission {
+  read_only
+  read_write
+}
+
+model AdvisorPortfolioAccess {
+  id          String            @id @default(uuid())
+  advisorId   String
+  portfolioId String
+  permission  AdvisorPermission @default(read_only)
+  grantedAt   DateTime          @default(now())
+
+  advisor   User      @relation("AdvisorAccess", fields: [advisorId], references: [id], onDelete: Cascade)
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([advisorId, portfolioId])
+  @@map("advisor_portfolio_access")
+}
