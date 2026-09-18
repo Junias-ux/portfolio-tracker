@@ -1,34 +1,34 @@
 version: 2
 updates:
-  # 1. Vérification des dépendances npm (package.json)
+  # Dépendances npm (package.json)
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-      time: "08:00"
-      timezone: "Africa/Douala"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "chore(deps)"
-      include: "scope"
-    # Regroupe les petites mises à jour mineures/patchs dans une seule PR
+    open-pull-requests-limit: 10
     groups:
+      # Regroupe les mises à jour mineures/correctives en une seule PR,
+      # pour ne pas être submergé de PR séparées chaque semaine.
       minor-and-patch:
-        patterns:
-          - "*"
         update-types:
           - "minor"
           - "patch"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
 
-  # 2. Vérification des actions GitHub (.github/workflows)
+  # Actions utilisées dans .github/workflows/ci.yml
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-      time: "08:00"
-      timezone: "Africa/Douala"
-    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "ci"
     commit-message:
-      prefix: "ci(deps)"
+      prefix: "chore"
+      include: "scope"
