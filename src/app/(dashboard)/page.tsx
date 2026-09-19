@@ -21,7 +21,7 @@ export default function DashboardPage() {
         <span className={totalGain >= 0 ? "text-green" : "text-red"}>
           {totalGain >= 0 ? "▲" : "▼"} {formatPercentage(totalGainPct)} ({formatCurrency(totalGain, "XAF")})
         </span>{" "}
-        depuis le début de l'année
+        depuis le début de l&apos;année
       </p>
 
       <Panel title="Évolution de la valeur" className="mt-8">
