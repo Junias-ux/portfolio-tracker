@@ -11,23 +11,45 @@ const TYPES = [
   { value: "withdrawal", label: "Retrait" },
 ] as const;
 
-export function TransactionModal({ onClose }: { onClose: () => void }) {
+export function TransactionModal({ assetId, onClose }: { assetId: string; onClose: () => void }) {
   const [type, setType] = useState<(typeof TYPES)[number]["value"]>("buy");
   const [quantity, setQuantity] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setSubmitting(true);
-    // TODO : brancher sur POST /api/transactions une fois la route prête.
-    // Le corps enverra { type, quantity, unitPrice, transactionDate: date, note }
-    // et le backend recalculera quantité + PRU côté serveur (voir averageCost.ts).
-    await new Promise((r) => setTimeout(r, 400));
-    setSubmitting(false);
-    onClose();
+    setError(null);
+
+    try {
+      const response = await fetch("/api/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assetId,
+          type,
+          quantity: Number(quantity),
+          unitPrice: Number(unitPrice),
+          transactionDate: date,
+          note: note || undefined,
+        }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error ?? "Impossible d'enregistrer la transaction.");
+      }
+
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Une erreur est survenue.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -98,6 +120,8 @@ export function TransactionModal({ onClose }: { onClose: () => void }) {
             className="w-full border border-line rounded-[3px] px-3 py-2.5 text-sm bg-bg"
           />
         </Field>
+
+        {error && <p className="mb-4 text-sm text-red-600" role="alert">{error}</p>}
 
         <div className="flex gap-2.5 mt-2">
           <Button type="submit" variant="primary" className="flex-1" disabled={submitting}>
