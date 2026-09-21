@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { mockUser } from "@/lib/mockData";
+import { useSession, signOut } from "next-auth/react";
 
 const NAV_ITEMS = [
   { href: "/", label: "Tableau de bord" },
@@ -15,6 +15,7 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { data: session } = useSession();
 
   return (
     <aside className="hidden sm:block w-[220px] shrink-0 border-r border-line bg-panel px-5 py-7">
@@ -35,9 +36,15 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="mt-10 pt-5 border-t border-line text-xs text-muted">
-        <div className="font-medium text-ink">{mockUser.fullName}</div>
-        <div>{mockUser.email}</div>
+      <div className="mt-10 pt-5 border-t border-line text-xs">
+        <div className="font-medium text-ink">{session?.user?.name ?? "…"}</div>
+        <div className="text-muted">{session?.user?.email ?? ""}</div>
+        <button
+          onClick={() => signOut({ callbackUrl: "/login" })}
+          className="mt-3 text-muted hover:text-ink underline underline-offset-2"
+        >
+          Se déconnecter
+        </button>
       </div>
     </aside>
   );

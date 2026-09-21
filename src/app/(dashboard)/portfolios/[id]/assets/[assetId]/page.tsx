@@ -75,7 +75,9 @@ export default function AssetDetailPage({ params }: { params: { id: string; asse
         </table>
       </Panel>
 
-      {modalOpen && <TransactionModal onClose={() => setModalOpen(false)} />}
+      {modalOpen && (
+        <TransactionModal assetId={params.assetId} onClose={() => setModalOpen(false)} />
+      )}
     </div>
   );
 }

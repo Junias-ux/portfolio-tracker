@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
 import Decimal from "decimal.js";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { applyBuy, applySell } from "@/lib/calculations/averageCost";
 import {
@@ -10,14 +12,12 @@ import {
 import { getLatestPrice } from "@/lib/quotes";
 import { transactionInputSchema } from "@/lib/validation/transaction";
 
-// TODO (sécurité) : une fois NextAuth branché, vérifier ici que
-// l'utilisateur connecté est bien propriétaire du portefeuille contenant
-// cet actif (ou qu'il a un accès conseiller avec permission "read_write" —
-// voir la table advisor_portfolio_access). Sans cette vérification, N'IMPORTE
-// QUI connaissant un assetId peut aujourd'hui écrire dessus. Ne pas déployer
-// cette route en production avant cette étape.
-
 export async function POST(request: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Authentification requise." }, { status: 401 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -36,9 +36,29 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const asset = await tx.asset.findUnique({ where: { id: assetId } });
+      const asset = await tx.asset.findUnique({
+        where: { id: assetId },
+        include: { portfolio: true },
+      });
       if (!asset) {
         throw new RouteError(404, "Actif introuvable.");
+      }
+
+      // Autorisation : propriétaire du portefeuille, OU conseiller avec
+      // un accès explicite en écriture (advisor_portfolio_access).
+      const isOwner = asset.portfolio.userId === session.user.id;
+      if (!isOwner) {
+        const advisorAccess = await tx.advisorPortfolioAccess.findUnique({
+          where: {
+            advisorId_portfolioId: {
+              advisorId: session.user.id,
+              portfolioId: asset.portfolioId,
+            },
+          },
+        });
+        if (!advisorAccess || advisorAccess.permission !== "read_write") {
+          throw new RouteError(403, "Vous n'avez pas les droits d'écriture sur ce portefeuille.");
+        }
       }
 
       const currentPosition = {
@@ -124,9 +144,34 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Authentification requise." }, { status: 401 });
+  }
+
   const assetId = request.nextUrl.searchParams.get("assetId");
   if (!assetId) {
     return NextResponse.json({ error: "Le paramètre assetId est requis." }, { status: 400 });
+  }
+
+  const asset = await prisma.asset.findUnique({
+    where: { id: assetId },
+    include: { portfolio: true },
+  });
+  if (!asset) {
+    return NextResponse.json({ error: "Actif introuvable." }, { status: 404 });
+  }
+
+  const isOwner = asset.portfolio.userId === session.user.id;
+  if (!isOwner) {
+    const advisorAccess = await prisma.advisorPortfolioAccess.findUnique({
+      where: {
+        advisorId_portfolioId: { advisorId: session.user.id, portfolioId: asset.portfolioId },
+      },
+    });
+    if (!advisorAccess) {
+      return NextResponse.json({ error: "Accès refusé." }, { status: 403 });
+    }
   }
 
   const transactions = await prisma.transaction.findMany({
