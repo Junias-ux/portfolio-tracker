@@ -1,83 +1,90 @@
-"use client";
-
-import { useState } from "react";
-import { notFound } from "next/navigation";
-import { PageHeader, Panel, StatStrip, StatCell, Button, Tag } from "@/components/ui";
+import { notFound, redirect } from "next/navigation";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { getAssetDetail } from "@/lib/data";
+import { canWrite } from "@/lib/access";
+import { PageHeader, Panel, StatStrip, StatCell, Tag } from "@/components/ui";
 import { ValueLineChart } from "@/components/charts/ValueLineChart";
-import { TransactionModal } from "@/components/TransactionModal";
-import { mockAssets, mockTransactions, mockValueHistory } from "@/lib/mockData";
-import { formatCurrency, formatNumber, formatPercentage, formatDate } from "@/lib/format";
+import { AssetActions } from "@/components/AssetActions";
+import { transactionTypeLabels } from "@/lib/labels";
+import { formatNumber, formatPercentage, formatDate } from "@/lib/format";
 
-const TRANSACTION_LABELS: Record<string, string> = {
-  buy: "Achat",
-  sell: "Vente",
-  dividend: "Dividende",
-  deposit: "Dépôt",
-  withdrawal: "Retrait",
-  fee: "Frais",
-};
+export default async function AssetDetailPage({
+  params,
+}: {
+  params: { id: string; assetId: string };
+}) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) redirect("/login");
 
-export default function AssetDetailPage({ params }: { params: { id: string; assetId: string } }) {
-  const [modalOpen, setModalOpen] = useState(false);
-  const asset = mockAssets[params.id]?.find((a) => a.id === params.assetId);
-  const transactions = mockTransactions[params.assetId] ?? [];
+  const detail = await getAssetDetail(session.user.id, params.id, params.assetId);
+  if (!detail) notFound();
 
-  if (!asset) notFound();
-
-  const gainPct = ((asset.currentPrice - asset.averageCost) / asset.averageCost) * 100;
+  const { asset, transactions, quotes, access, currency } = detail;
 
   return (
     <div>
       <PageHeader
         title={`${asset.name}${asset.symbol ? ` (${asset.symbol})` : ""}`}
-        action={<Button variant="primary" onClick={() => setModalOpen(true)}>+ Nouvelle transaction</Button>}
+        action={canWrite(access) ? <AssetActions assetId={asset.id} /> : undefined}
       />
 
       <StatStrip>
-        <StatCell label="Quantité détenue" value={formatNumber(asset.quantityHeld)} />
-        <StatCell label="Prix moyen d'achat" value={formatNumber(asset.averageCost)} />
-        <StatCell label="Plus-value latente" value={formatPercentage(gainPct)} tone={gainPct >= 0 ? "gain" : "loss"} />
+        <StatCell label="Quantité détenue" value={formatNumber(asset.quantityHeld, 8)} />
+        <StatCell label={`Prix moyen d'achat (${currency})`} value={formatNumber(asset.averageCost)} />
+        <StatCell
+          label="Plus-value latente"
+          value={formatPercentage(asset.gainPct)}
+          tone={asset.gainPct >= 0 ? "gain" : "loss"}
+        />
       </StatStrip>
 
+      {!asset.hasQuote && (
+        <p className="text-[12.5px] text-muted mb-6">
+          Aucun cours saisi : la valeur est calculée au prix moyen d&apos;achat, donc la plus-value reste à 0 tant que
+          vous n&apos;avez pas saisi un cours.
+        </p>
+      )}
+
       <Panel title="Évolution du cours">
-        <ValueLineChart data={mockValueHistory} />
+        {quotes.length >= 2 ? (
+          <ValueLineChart data={quotes.map((q) => ({ date: formatDate(q.date), value: q.price }))} />
+        ) : (
+          <p className="text-sm text-muted">Saisissez au moins deux cours à des dates différentes pour voir la courbe.</p>
+        )}
       </Panel>
 
       <Panel title="Historique des transactions">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-muted border-b border-ink">
-              <th className="pb-2.5 font-medium">Date</th>
-              <th className="pb-2.5 font-medium">Type</th>
-              <th className="pb-2.5 font-medium text-right">Quantité</th>
-              <th className="pb-2.5 font-medium text-right">Prix</th>
-            </tr>
-          </thead>
-          <tbody>
-            {transactions.map((t) => (
-              <tr key={t.id} className="border-b border-line last:border-none">
-                <td className="py-3.5">{formatDate(t.date)}</td>
-                <td className="py-3.5">
-                  <Tag>{TRANSACTION_LABELS[t.type]}</Tag>
-                </td>
-                <td className="py-3.5 text-right font-serif">{t.quantity !== null ? formatNumber(t.quantity) : "—"}</td>
-                <td className="py-3.5 text-right font-serif">{t.unitPrice !== null ? formatNumber(t.unitPrice) : "—"}</td>
+        {transactions.length === 0 ? (
+          <p className="text-sm text-muted">Aucune transaction pour le moment.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-muted border-b border-ink">
+                <th className="pb-2.5 font-medium">Date</th>
+                <th className="pb-2.5 font-medium">Type</th>
+                <th className="pb-2.5 font-medium text-right">Quantité</th>
+                <th className="pb-2.5 font-medium text-right">Prix / montant</th>
               </tr>
-            ))}
-            {transactions.length === 0 && (
-              <tr>
-                <td colSpan={4} className="py-6 text-center text-muted">
-                  Aucune transaction pour le moment.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {transactions.map((t) => {
+                const isTrade = t.type === "buy" || t.type === "sell";
+                return (
+                  <tr key={t.id} className="border-b border-line last:border-none">
+                    <td className="py-3.5">{formatDate(t.date)}</td>
+                    <td className="py-3.5">
+                      <Tag>{transactionTypeLabels[t.type] ?? t.type}</Tag>
+                    </td>
+                    <td className="py-3.5 text-right font-serif">{isTrade ? formatNumber(t.quantity, 8) : "—"}</td>
+                    <td className="py-3.5 text-right font-serif">{formatNumber(t.unitPrice)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </Panel>
-
-      {modalOpen && (
-        <TransactionModal assetId={params.assetId} onClose={() => setModalOpen(false)} />
-      )}
     </div>
   );
 }
